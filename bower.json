@@ -1,0 +1,20 @@
+{
+  "name": "purescript-router",
+  "authors": [
+    "Chris Blake <chris@code.sc> (https://code.sc)"
+  ],
+  "version": "0.0.0",
+  "moduleType": [
+    "node"
+  ],
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "output"
+  ],
+  "dependencies": {
+    "purescript-maybe": "~0.3.5",
+    "purescript-pathy": "~0.3.0"
+  }
+}
