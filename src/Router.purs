@@ -1,6 +1,5 @@
 module Router
-	( Pathy(SegmentDir, SegmentFile, TokenDir, TokenFile, RootDir)
-	, IsURI, fromURI, toURI
+	( IsURI, fromURI, toURI
 	, Parser()
 	, rootDir
 	, dir
@@ -17,15 +16,38 @@ module Router
 	, numFile
 	, paramDir
 	, paramFile
+	, Method
+		( OPTIONS
+		, GET
+		, HEAD
+		, POST
+		, PUT
+		, PATCH
+		, DELETE
+		, TRACE
+		, CONNECT
+		, Custom
+		)
+	, methodFromString
+	, Route(NotFound, Route)
+	, IsRoute
+	, route
+	, makeRoute
 	) where
 
 import Prelude
 
 import Data.Char         (toString)
-import Data.String       (toChar)
-import Data.String.Regex (Regex(), noFlags, regex)
+import Data.Either       (either)
 import Data.Maybe        (Maybe(Just, Nothing))
+import Data.String       (toChar, toLower, toUpper)
+import Data.String.Regex (Regex(), noFlags, regex)
+import Data.Tuple        (Tuple(Tuple))
+import Data.URI.Types    (HierarchicalPart(HierarchicalPart), URI(URI))
 import qualified Data.Path.Pathy as P
+
+(|>) :: forall a b c. (a -> b) -> (b -> c) -> a -> c
+(|>) = (>>>)
 
 data Pathy = SegmentDir  (P.RelDir  P.Sandboxed)
 		   | SegmentFile (P.RelFile P.Sandboxed)
@@ -53,11 +75,11 @@ foreign import encodeURIComponent :: String -> String
 
 instance isURIChar :: IsURI Char where
 	fromURI = toChar
-	toURI   = toString >>> encodeURIComponent
+	toURI   = toString |> encodeURIComponent
 
 instance isURIString :: IsURI String where
-	fromURI = decodeURIComponent >>> Just
-	toURI   = id >>> encodeURIComponent
+	fromURI = decodeURIComponent |> Just
+	toURI   = id |> encodeURIComponent
 
 foreign import parseIntImpl :: forall a.
 	(a -> Maybe a) -> -- Just constructor
@@ -69,8 +91,8 @@ parseInt :: String -> Maybe Int
 parseInt = parseIntImpl Just (const Nothing)
 
 instance isURIInt :: IsURI Int where
-	fromURI = decodeURIComponent >>> parseInt
-	toURI   = show >>> encodeURIComponent
+	fromURI = decodeURIComponent |> parseInt
+	toURI   = show |> encodeURIComponent
 
 type Continuation a = forall b. (IsURI a) => (a -> b)
 
@@ -134,3 +156,66 @@ paramDir = regexDir paramRegex
 
 paramFile :: Parser Unit
 paramFile = regexFile paramRegex
+
+data Method = OPTIONS
+			| GET
+			| HEAD
+			| POST
+			| PUT
+			| PATCH
+			| DELETE
+			| TRACE
+			| CONNECT
+			| Custom String
+
+instance showMethod :: Show Method where
+	show OPTIONS    = "OPTIONS"
+	show GET        = "GET"
+	show HEAD       = "HEAD"
+	show POST       = "POST"
+	show PUT        = "PUT"
+	show PATCH      = "PATCH"
+	show DELETE     = "DELETE"
+	show TRACE      = "TRACE"
+	show CONNECT    = "CONNECT"
+	show (Custom c) = "Custom " <> show c
+
+methodFromString :: String -> Method
+methodFromString c = case c' of
+	"OPTIONS" -> OPTIONS
+	"GET"     -> GET
+	"HEAD"    -> HEAD
+	"POST"    -> POST
+	"PUT"     -> PUT
+	"PATCH"   -> PATCH
+	"DELETE"  -> DELETE
+	"TRACE"   -> TRACE
+	"CONNECT" -> CONNECT
+	_         -> Custom c'
+		where
+			c' = toUpper c
+
+data Route a = NotFound | Route Method a
+
+instance showRoute :: (Show a) => Show (Route a) where
+	show NotFound    = "NotFound"
+	show (Route m a) = "Route (" <> show m <> ") (" <> show a <> ")"
+
+class IsRoute a where
+	route :: URI -> Route a
+
+toPathyArray :: forall a b. P.Path a b P.Sandboxed -> Array Pathy
+toPathyArray p = [RootDir] <> folder (P.peel p) []
+	where
+		toSegmentDir  = P.runDirName  |> toLower |> P.dir  |> SegmentDir
+		toSegmentFile = P.runFileName |> toLower |> P.file |> SegmentFile
+
+		folder Nothing            xs = xs
+		folder (Just (Tuple d e)) xs =
+			folder (P.peel d) ([either toSegmentDir toSegmentFile e] <> xs)
+
+makeRoute :: forall a. (IsRoute a) => URI -> a -> Parser a
+makeRoute (URI _ (HierarchicalPart _ Nothing ) _ _) = Parser []
+makeRoute (URI _ (HierarchicalPart _ (Just u)) _ _) = Parser (toPathyArray' u)
+	where
+		toPathyArray' = either toPathyArray toPathyArray
